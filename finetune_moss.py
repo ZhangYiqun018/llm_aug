@@ -1,21 +1,19 @@
 """Code for moss-sft"""
-import os
+import argparse
 import copy
 import json
-import torch
 import logging
-import argparse
+import os
 
+import torch
 import torch.distributed as dist
-
-from tqdm import tqdm
+import wandb
 from accelerate import Accelerator
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from transformers import set_seed, get_cosine_schedule_with_warmup
-
-from transformers import AutoTokenizer, AutoModelForCausalLM
-
+from tqdm import tqdm
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          get_cosine_schedule_with_warmup, set_seed)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level='INFO')
@@ -165,12 +163,20 @@ def train(args):
     # Remember you still need to do gradient accumulation by yourself, just like you would have done without deepspeed
     # deepspeed_plugin = DeepSpeedPlugin(zero_stage=3, gradient_accumulation_steps=1)
     # deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = 2
-    accelerator = Accelerator(mixed_precision='fp16') 
+    
+    accelerator = Accelerator(
+        mixed_precision='fp16',
+        log_with='wandb'
+    ) 
 
     if accelerator.is_main_process:
         writer = SummaryWriter(args.log_dir)
         writer.add_hparams(vars(args), {})
-
+        wandb.init(
+            project = 'moss-aug',
+            config  = vars(args)
+        )
+        
     accelerator.state.deepspeed_plugin.deepspeed_config['train_micro_batch_size_per_gpu'] = args.train_bsz_per_gpu
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
@@ -244,7 +250,8 @@ def train(args):
                 writer.add_scalar('loss', train_loss, global_step=global_step)
                 writer.add_scalar('acc', acc, global_step=global_step)
                 writer.add_scalar('lr', lr_scheduler.get_last_lr()[0], global_step=global_step)
-
+                wandb.log({"skip": int(accelerator.optimizer_step_was_skipped), "loss": train_loss, "acc": acc, "lr": lr_scheduler.get_last_lr()[0]}, step=global_step)
+            
             if global_step % args.eval_step == 0 or global_step == 1:
                 torch.cuda.empty_cache()
                 model.eval() 
@@ -262,7 +269,8 @@ def train(args):
                     writer.add_scalar(f'val_loss', val_loss, global_step=global_step)
                     writer.add_scalar(f'val_acc', val_acc, global_step=global_step)
                     accelerator.print(f"Epoch: {epoch}, Step: {batch_cnt}, Val loss: {val_loss}, Val acc: {val_acc}")
-
+                    wandb.log({"val_loss": val_loss, "val_acc": val_acc}, step=global_step)
+                    
                 model.train()           
 
             if global_step % args.save_step == 0:

@@ -12,7 +12,7 @@ accelerate launch \
     --data_dir /data/zhangxiaoming/llm_aug/dataset/trainset \
     --output_dir /datas/huggingface/moss-base-7b/moss-7b-sft \
     --train_bsz_per_gpu 1 \
-    --eval_bsz_per_gpu 2 \
+    --eval_bsz_per_gpu 1 \
     --learning_rate 0.000015 \
     --n_epochs 1 \
     --save_step 1000 \
